@@ -1,0 +1,879 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>備品耗用量追蹤系統 (IndexedDB)</title>
+    <!-- 引入 Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* 使用 Inter 字體以獲得更好的現代感 */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f7f9fb;
+        }
+        /* 自定義滾動條樣式 */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #e0e7ff;
+            border-radius: 10px;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #8b5cf6;
+            border-radius: 10px;
+        }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+
+    <div id="app" class="max-w-7xl mx-auto">
+        <h1 class="text-3xl font-extrabold text-gray-900 mb-6 border-b-4 border-indigo-500 pb-2">
+            備品耗用量追蹤系統
+        </h1>
+        
+        <!-- 訊息/通知區塊 -->
+        <div id="message-box" class="hidden p-4 mb-4 rounded-lg text-sm transition-all duration-300 flex justify-between items-center" role="alert">
+            <span id="message-text"></span>
+        </div>
+
+        <!-- 自定義確認對話框 (Modal) -->
+        <div id="confirm-modal" class="hidden fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+            <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+                <div class="mt-3 text-center">
+                    <h3 class="text-lg leading-6 font-medium text-gray-900">確認刪除</h3>
+                    <div class="mt-2 px-7 py-3">
+                        <p class="text-sm text-gray-500">您確定要刪除這筆記錄嗎？此動作無法復原。</p>
+                    </div>
+                    <div class="items-center px-4 py-3 space-x-4">
+                        <button id="cancel-delete" class="px-4 py-2 bg-gray-200 text-gray-800 text-base font-medium rounded-md shadow-sm hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400">
+                            取消
+                        </button>
+                        <button id="confirm-delete" class="px-4 py-2 bg-red-600 text-white text-base font-medium rounded-md shadow-sm hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500">
+                            刪除
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="deplete-modal" class="hidden fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+            <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+                <div class="mt-3">
+                    <h3 class="text-lg leading-6 font-medium text-gray-900 text-center">記錄耗盡日期</h3>
+                    <div class="mt-4">
+                        <label for="deplete-date" class="block text-sm font-medium text-gray-700 mb-1">耗盡日期</label>
+                        <input type="date" id="deplete-date" required
+                               class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition duration-150">
+                    </div>
+                    <div class="items-center px-4 py-3 mt-2 space-x-4 text-center">
+                        <button id="cancel-deplete" class="px-4 py-2 bg-gray-200 text-gray-800 text-base font-medium rounded-md shadow-sm hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400">
+                            取消
+                        </button>
+                        <button id="confirm-deplete" class="px-4 py-2 bg-emerald-600 text-white text-base font-medium rounded-md shadow-sm hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                            儲存
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="monthly-depleted-modal" class="hidden fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-40">
+            <div class="relative top-12 mx-auto p-5 border w-[92%] max-w-4xl shadow-lg rounded-md bg-white">
+                <div class="flex items-center justify-between gap-3 mb-4">
+                    <h3 id="monthly-depleted-title" class="text-lg leading-6 font-medium text-gray-900">當月耗盡紀錄</h3>
+                    <button id="close-monthly-depleted" class="px-3 py-2 bg-gray-200 text-gray-800 text-sm font-bold rounded-md hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400">
+                        關閉
+                    </button>
+                </div>
+                <div class="overflow-x-auto border border-gray-100 rounded-lg">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-slate-50">
+                            <tr>
+                                <th class="px-4 py-2 text-left text-xs font-bold text-slate-700 uppercase">開始日期</th>
+                                <th class="px-4 py-2 text-left text-xs font-bold text-slate-700 uppercase">耗盡日期</th>
+                                <th class="px-4 py-2 text-left text-xs font-bold text-slate-700 uppercase">類別</th>
+                                <th class="px-4 py-2 text-left text-xs font-bold text-slate-700 uppercase">規格</th>
+                                <th class="px-4 py-2 text-left text-xs font-bold text-slate-700 uppercase">使用天數</th>
+                                <th class="px-4 py-2 text-center text-xs font-bold text-slate-700 uppercase">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="monthly-depleted-body" class="bg-white divide-y divide-gray-100"></tbody>
+                    </table>
+                </div>
+                <div id="monthly-depleted-empty" class="hidden p-4 text-center text-gray-400">這個月份沒有耗盡紀錄</div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">
+            <!-- 左側：輸入表單 -->
+            <div class="lg:col-span-1 bg-white p-6 rounded-xl shadow-lg border border-gray-100">
+                <h2 class="text-2xl font-semibold text-indigo-700 mb-6">記錄備品開始使用</h2>
+                <form id="consumption-form" class="flex flex-col gap-5">
+                    
+                    <div>
+                        <label for="date" class="block text-sm font-medium text-gray-700 mb-1">開始使用日期</label>
+                        <input type="date" id="date" required 
+                               class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition duration-150">
+                    </div>
+
+                    <div>
+                        <label for="category" class="block text-sm font-medium text-gray-700 mb-1">備品類別</label>
+                        <input type="text" id="category" list="category-list" placeholder="輸入或選擇類別" required 
+                               class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition duration-150">
+                        <datalist id="category-list"></datalist>
+                    </div>
+                    
+                    <div>
+                        <label for="spec" class="block text-sm font-medium text-gray-700 mb-1">備品規格/描述</label>
+                        <input type="text" id="spec" list="spec-list" placeholder="輸入或選擇規格" required 
+                               class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition duration-150">
+                        <datalist id="spec-list"></datalist>
+                    </div>
+
+                    <div>
+                        <label for="amount" class="block text-sm font-medium text-gray-700 mb-1">金額</label>
+                        <input type="number" id="amount" min="0" step="1" placeholder="輸入金額"
+                               class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition duration-150">
+                    </div>
+
+                    <button type="submit" 
+                            class="w-full py-3 px-4 bg-indigo-600 text-white font-bold rounded-lg shadow-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition duration-150 transform hover:scale-[1.02] mt-2">
+                        + 新增使用紀錄
+                    </button>
+                </form>
+            </div>
+
+            <!-- 右側：使用狀況 (TOP 10) -->
+            <div class="lg:col-span-2 bg-white p-6 rounded-xl shadow-lg border border-gray-100 flex flex-col">
+                <h2 class="text-2xl font-semibold text-purple-700 mb-4">使用狀況 (TOP 10)</h2>
+                <div class="overflow-x-auto border border-gray-100 rounded-lg">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-purple-50">
+                            <tr>
+                                <th class="px-4 py-2 text-left text-xs font-bold text-purple-700 uppercase">開始日期</th>
+                                <th class="px-4 py-2 text-left text-xs font-bold text-purple-700 uppercase">耗盡日期</th>
+                                <th class="px-4 py-2 text-left text-xs font-bold text-purple-700 uppercase">類別</th>
+                                <th class="px-4 py-2 text-left text-xs font-bold text-purple-700 uppercase">規格</th>
+                                <th class="px-4 py-2 text-left text-xs font-bold text-purple-700 uppercase whitespace-nowrap">使用天數</th>
+                                <th class="px-4 py-2 text-center text-xs font-bold text-purple-700 uppercase">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="top10-history-body" class="bg-white divide-y divide-gray-100"></tbody>
+                    </table>
+                </div>
+                <div id="no-history-msg" class="hidden p-4 text-center text-gray-400">暫無記錄</div>
+            </div>
+        </div>
+
+        <!-- 耗用量報告區塊 (底部) -->
+        <div class="bg-white p-6 rounded-xl shadow-lg border border-gray-100">
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
+                <div>
+                    <h2 class="text-2xl font-semibold text-slate-800">資料備份</h2>
+                    <p class="text-sm text-gray-500 mt-1">匯出目前紀錄，或從備份檔匯入還原。</p>
+                </div>
+                <div class="flex flex-wrap gap-2">
+                    <button type="button" id="export-data"
+                            class="px-4 py-2 bg-slate-700 text-white text-sm font-bold rounded-lg shadow-sm hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-500 focus:ring-offset-2 transition">
+                        匯出備份
+                    </button>
+                    <label for="import-data"
+                           class="cursor-pointer px-4 py-2 bg-white text-slate-700 text-sm font-bold rounded-lg border border-slate-300 shadow-sm hover:bg-slate-50 focus-within:ring-2 focus-within:ring-slate-500 focus-within:ring-offset-2 transition">
+                        匯入備份
+                    </label>
+                    <input type="file" id="import-data" accept="application/json,.json" class="hidden">
+                </div>
+            </div>
+
+            <h2 class="text-2xl font-semibold text-green-700 mb-4">每月備品耗用統計</h2>
+            <div id="report-output" class="overflow-x-auto mb-8">
+                <p class="text-gray-500">正在加載數據...</p>
+            </div>
+
+            <h2 class="text-2xl font-semibold text-orange-700 mb-4">年度平均耗用分析</h2>
+            <div id="average-report-output" class="overflow-x-auto">
+                <!-- 由 JS 動態生成年度平均報表 -->
+            </div>
+        </div>
+        
+    </div>
+
+    <script>
+        const DB_NAME = 'SparePartsDB';
+        const DB_VERSION = 1;
+        const STORE_NAME = 'consumptions';
+        let db;
+        let pendingDeleteId = null;
+        let pendingDepleteId = null;
+        let currentMonthlyDepletedMonth = null;
+
+        function displayMessage(message, type) {
+            const box = document.getElementById('message-box');
+            const text = document.getElementById('message-text');
+            text.textContent = message;
+            box.className = 'p-4 mb-4 rounded-lg text-sm transition-all duration-300 flex justify-between items-center';
+            box.classList.remove('hidden');
+            if (type === 'success') box.classList.add('bg-green-100', 'text-green-800');
+            else if (type === 'error') box.classList.add('bg-red-100', 'text-red-800');
+            setTimeout(() => box.classList.add('hidden'), 3000);
+        }
+
+        function openDatabase() {
+            return new Promise((resolve, reject) => {
+                const request = indexedDB.open(DB_NAME, DB_VERSION);
+                request.onerror = (e) => reject(e.target.error);
+                request.onsuccess = (e) => { db = e.target.result; resolve(db); };
+                request.onupgradeneeded = (e) => {
+                    db = e.target.result;
+                    if (!db.objectStoreNames.contains(STORE_NAME)) {
+                        const store = db.createObjectStore(STORE_NAME, { keyPath: 'id', autoIncrement: true });
+                        store.createIndex('dateIndex', 'date', { unique: false });
+                        store.createIndex('categoryIndex', 'category', { unique: false });
+                    }
+                };
+            });
+        }
+
+        function addConsumption(item) {
+            const transaction = db.transaction([STORE_NAME], 'readwrite');
+            const store = transaction.objectStore(STORE_NAME);
+            return new Promise((resolve, reject) => {
+                const request = store.add(item);
+                request.onsuccess = () => resolve();
+                request.onerror = (e) => reject(e.target.error);
+            });
+        }
+
+        function addConsumptions(items) {
+            const transaction = db.transaction([STORE_NAME], 'readwrite');
+            const store = transaction.objectStore(STORE_NAME);
+
+            return new Promise((resolve, reject) => {
+                let addedCount = 0;
+                transaction.oncomplete = () => resolve(addedCount);
+                transaction.onerror = (e) => reject(e.target.error);
+
+                items.forEach(item => {
+                    const request = store.add(item);
+                    request.onsuccess = () => addedCount += 1;
+                });
+            });
+        }
+
+        function deleteConsumption(id) {
+            const transaction = db.transaction([STORE_NAME], 'readwrite');
+            const store = transaction.objectStore(STORE_NAME);
+            return new Promise((resolve, reject) => {
+                const request = store.delete(id);
+                request.onsuccess = () => resolve();
+                request.onerror = (e) => reject(e.target.error);
+            });
+        }
+
+        function updateConsumptionEndDate(id, endDate) {
+            const transaction = db.transaction([STORE_NAME], 'readwrite');
+            const store = transaction.objectStore(STORE_NAME);
+
+            return new Promise((resolve, reject) => {
+                const getRequest = store.get(id);
+                getRequest.onerror = (e) => reject(e.target.error);
+                getRequest.onsuccess = (e) => {
+                    const item = e.target.result;
+                    if (!item) {
+                        reject(new Error('找不到這筆紀錄'));
+                        return;
+                    }
+
+                    item.endDate = endDate;
+                    const putRequest = store.put(item);
+                    putRequest.onsuccess = () => resolve();
+                    putRequest.onerror = (event) => reject(event.target.error);
+                };
+            });
+        }
+
+        function getAllConsumptions() {
+            const transaction = db.transaction([STORE_NAME], 'readonly');
+            const store = transaction.objectStore(STORE_NAME);
+            return new Promise((resolve, reject) => {
+                const request = store.getAll();
+                request.onsuccess = (e) => resolve(e.target.result);
+                request.onerror = (e) => reject(e.target.error);
+            });
+        }
+
+        function updateUI(data) {
+            updateCategoryDatalist(data);
+            updateSpecDatalist(data);
+            updateTop10History(data);
+            renderMonthlyReport(data);
+        }
+
+        function updateCategoryDatalist(data) {
+            const datalist = document.getElementById('category-list');
+            const categories = [...new Set(data.map(item => item.category.trim()))].sort();
+            datalist.innerHTML = categories.map(cat => `<option value="${cat}">`).join('');
+        }
+
+        function updateSpecDatalist(data) {
+            const datalist = document.getElementById('spec-list');
+            const specs = [...new Set(data.map(item => item.spec.trim()))].sort();
+            datalist.innerHTML = specs.map(spec => `<option value="${spec}">`).join('');
+        }
+
+        function getAmountValue(item) {
+            const amount = Number(item.amount);
+            return Number.isFinite(amount) && amount > 0 ? amount : 0;
+        }
+
+        function formatCurrency(amount) {
+            return amount > 0 ? `$${Math.round(amount).toLocaleString('zh-TW')}` : '-';
+        }
+
+        function normalizeDate(date) {
+            if (!date) return null;
+            const dateObj = new Date(date);
+            if (Number.isNaN(dateObj.getTime())) return null;
+            dateObj.setHours(0, 0, 0, 0);
+            return dateObj;
+        }
+
+        function getUsageDays(item, includeActive = true) {
+            const startDate = normalizeDate(item.date);
+            const endDate = normalizeDate(item.endDate);
+            if (!startDate) return null;
+
+            let calcEndDate = endDate;
+            if (!calcEndDate && includeActive) {
+                calcEndDate = new Date();
+                calcEndDate.setHours(0, 0, 0, 0);
+            }
+            if (!calcEndDate) return null;
+
+            return Math.max(1, Math.ceil((calcEndDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)) + 1);
+        }
+
+        function todayString() {
+            const date = new Date();
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        }
+
+        function normalizeImportedItem(item) {
+            if (!item || typeof item !== 'object') return null;
+
+            const date = String(item.date || '').trim();
+            const endDate = String(item.endDate || '').trim();
+            const category = String(item.category || '').trim();
+            const spec = String(item.spec || '').trim();
+            const amount = item.amount === null || item.amount === undefined || item.amount === ''
+                ? null
+                : Number(item.amount);
+
+            if (!date || !category || !spec) return null;
+
+            return {
+                date,
+                endDate: endDate || null,
+                category,
+                spec,
+                amount: Number.isFinite(amount) ? amount : null
+            };
+        }
+
+        function getRecordKey(item) {
+            return [
+                item.date,
+                item.endDate || '',
+                item.category.trim(),
+                item.spec.trim(),
+                getAmountValue(item)
+            ].join('|');
+        }
+
+        function downloadJson(filename, data) {
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+        }
+
+        function updateTop10History(data) {
+            const tbody = document.getElementById('top10-history-body');
+            const noHistoryMsg = document.getElementById('no-history-msg');
+            
+            const activeData = data.filter(item => !item.endDate);
+
+            if (activeData.length === 0) {
+                tbody.innerHTML = '';
+                noHistoryMsg.textContent = '目前沒有使用中的紀錄';
+                noHistoryMsg.classList.remove('hidden');
+                return;
+            }
+            noHistoryMsg.classList.add('hidden');
+
+            const top10 = activeData
+                .sort((a, b) => new Date(b.date) - new Date(a.date))
+                .slice(0, 10);
+
+            let html = '';
+            top10.forEach(item => {
+                const usageDays = getUsageDays(item);
+                const isDepleted = Boolean(item.endDate);
+                const statusText = isDepleted ? '已耗盡' : '使用中';
+                const statusClass = isDepleted ? 'text-gray-500' : 'text-emerald-600';
+                const endDateText = item.endDate || '<span class="text-gray-400">未耗盡</span>';
+                const editEndDateButton = isDepleted ? `
+                    <button onclick="handleDepleteClick(${item.id})" class="text-slate-400 hover:text-emerald-600 transition-colors p-1" title="修改耗盡日期">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16.862 3.487a2.1 2.1 0 112.97 2.97L8.5 17.79 4 19l1.21-4.5L16.862 3.487z" />
+                        </svg>
+                    </button>` : '';
+                const depleteButton = isDepleted
+                    ? ''
+                    : `<button onclick="handleDepleteClick(${item.id})" class="px-3 py-1 bg-emerald-600 text-white text-xs font-bold rounded hover:bg-emerald-700 transition-colors whitespace-nowrap" title="選擇並記錄耗盡日期">記錄耗盡</button>`;
+
+                html += `
+                    <tr class="hover:bg-purple-50 transition-colors group">
+                        <td class="px-4 py-3 text-sm text-gray-600 whitespace-nowrap">${item.date}</td>
+                        <td class="px-4 py-3 text-sm text-gray-600 whitespace-nowrap">
+                            <div class="flex items-center gap-2">
+                                <span>${endDateText}</span>
+                                ${editEndDateButton}
+                            </div>
+                        </td>
+                        <td class="px-4 py-3 text-sm font-medium text-gray-800">
+                            ${item.category}
+                        </td>
+                        <td class="px-4 py-3 text-sm text-gray-500 truncate max-w-[150px]">${item.spec}</td>
+                        <td class="px-4 py-3 text-sm font-semibold text-purple-600 whitespace-nowrap">
+                            <span class="text-xs ${statusClass} font-normal mr-1">${statusText}</span>${usageDays !== null ? usageDays + ' 天' : '-'}
+                        </td>
+                        <td class="px-4 py-3 text-center whitespace-nowrap">
+                            ${depleteButton}
+                            <button onclick="handleDeleteClick(${item.id})" class="text-red-400 hover:text-red-600 transition-colors p-1" title="刪除此記錄">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                </svg>
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            });
+            tbody.innerHTML = html;
+        }
+
+        async function renderMonthlyDepletedRecords(month) {
+            const tbody = document.getElementById('monthly-depleted-body');
+            const emptyMsg = document.getElementById('monthly-depleted-empty');
+            const title = document.getElementById('monthly-depleted-title');
+            const allData = await getAllConsumptions();
+            const depletedRecords = allData
+                .filter(item => item.endDate && item.endDate.startsWith(month))
+                .sort((a, b) => new Date(b.endDate) - new Date(a.endDate));
+
+            title.textContent = `${month} 耗盡紀錄`;
+
+            if (depletedRecords.length === 0) {
+                tbody.innerHTML = '';
+                emptyMsg.classList.remove('hidden');
+                return;
+            }
+
+            emptyMsg.classList.add('hidden');
+            tbody.innerHTML = depletedRecords.map(item => {
+                const usageDays = getUsageDays(item, false);
+                return `
+                    <tr class="hover:bg-slate-50 transition-colors">
+                        <td class="px-4 py-3 text-sm text-gray-600 whitespace-nowrap">${item.date}</td>
+                        <td class="px-4 py-3 text-sm text-gray-600 whitespace-nowrap">${item.endDate}</td>
+                        <td class="px-4 py-3 text-sm font-medium text-gray-800">${item.category}</td>
+                        <td class="px-4 py-3 text-sm text-gray-500">${item.spec}</td>
+                        <td class="px-4 py-3 text-sm font-semibold text-purple-600 whitespace-nowrap">${usageDays !== null ? usageDays + ' 天' : '-'}</td>
+                        <td class="px-4 py-3 text-center whitespace-nowrap">
+                            <button onclick="handleDepleteClick(${item.id})" class="text-slate-400 hover:text-emerald-600 transition-colors p-1" title="修改耗盡日期">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16.862 3.487a2.1 2.1 0 112.97 2.97L8.5 17.79 4 19l1.21-4.5L16.862 3.487z" />
+                                </svg>
+                            </button>
+                            <button onclick="handleDeleteClick(${item.id})" class="text-red-400 hover:text-red-600 transition-colors p-1" title="刪除此記錄">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                </svg>
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function renderMonthlyReport(data) {
+            const outputElement = document.getElementById('report-output');
+            const avgOutputElement = document.getElementById('average-report-output');
+
+            if (data.length === 0) {
+                outputElement.innerHTML = '<p class="text-gray-500 p-4">目前沒有任何備品耗用記錄。</p>';
+                avgOutputElement.innerHTML = '';
+                return;
+            }
+
+            const report = {}; 
+            const categories = new Set();
+            const months = new Set();
+            const years = new Set();
+            const depletedData = data.filter(item => item.endDate);
+
+            if (depletedData.length === 0) {
+                outputElement.innerHTML = '<p class="text-gray-500 p-4">目前沒有已耗盡的備品紀錄可統計。</p>';
+                avgOutputElement.innerHTML = '<p class="text-gray-500 p-4">目前沒有已耗盡的備品紀錄可分析。</p>';
+                return;
+            }
+
+            depletedData.forEach(item => {
+                const dateObj = new Date(item.endDate);
+                const year = dateObj.getFullYear();
+                const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+                const yearMonth = `${year}-${month}`;
+                const category = item.category.trim() || '未分類';
+                
+                categories.add(category);
+                months.add(yearMonth);
+                years.add(year);
+
+                if (!report[yearMonth]) report[yearMonth] = {};
+                if (!report[yearMonth][category]) {
+                    report[yearMonth][category] = { count: 0, totalAmount: 0, pricedCount: 0 };
+                }
+
+                const amount = getAmountValue(item);
+                report[yearMonth][category].count += 1;
+                report[yearMonth][category].totalAmount += amount;
+                if (amount > 0) report[yearMonth][category].pricedCount += 1;
+            });
+
+            const sortedMonths = Array.from(months).sort().reverse();
+            const sortedCategories = Array.from(categories).sort();
+            const sortedYears = Array.from(years).sort().reverse();
+
+            // --- 渲染月報表 ---
+            let html = `<table class="min-w-full divide-y divide-gray-200 border border-gray-200 rounded-lg">
+                <thead class="bg-indigo-50">
+                    <tr>
+                        <th class="px-4 py-3 text-left text-xs font-bold text-gray-600 uppercase border-r sticky left-0 bg-indigo-50">月份</th>
+                        <th class="px-4 py-3 text-left text-xs font-bold text-gray-600 uppercase">類別</th>
+                        <th class="px-4 py-3 text-center text-xs font-bold text-gray-600 uppercase">耗用數量</th>
+                        <th class="px-4 py-3 text-center text-xs font-bold text-gray-600 uppercase">平均單價</th>
+                        <th class="px-4 py-3 text-center text-xs font-bold text-gray-600 uppercase">總金額</th>
+                        <th class="px-4 py-3 text-center text-xs font-bold text-gray-600 uppercase">品項耗盡紀錄</th>
+                    </tr>
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-200">`;
+
+            sortedMonths.forEach(month => {
+                const depletedCount = depletedData.filter(item => item.endDate.startsWith(month)).length;
+                const monthCategories = sortedCategories.filter(cat => report[month]?.[cat]?.count > 0);
+                const displayCategories = monthCategories.length > 0 ? monthCategories : ['-'];
+
+                displayCategories.forEach((cat, index) => {
+                    const summary = cat === '-' ? { count: 0, totalAmount: 0, pricedCount: 0 } : (report[month]?.[cat] || { count: 0, totalAmount: 0, pricedCount: 0 });
+                    const avgUnitPrice = summary.pricedCount > 0 ? summary.totalAmount / summary.pricedCount : 0;
+                    html += `<tr class="hover:bg-gray-50 transition">
+                    ${index === 0 ? `<td rowspan="${displayCategories.length}" class="px-4 py-3 whitespace-nowrap text-sm font-bold text-gray-900 border-r sticky left-0 bg-white align-top">
+                        <div>${month}</div>
+                        <button onclick="handleMonthlyDepletedClick('${month}')" class="mt-2 px-3 py-1 bg-slate-700 text-white text-xs font-bold rounded hover:bg-slate-800 transition-colors">
+                            耗盡紀錄 ${depletedCount}
+                        </button>
+                    </td>` : ''}
+                    <td class="px-4 py-3 text-sm font-medium text-gray-800">${cat}</td>
+                    <td class="px-4 py-3 text-sm text-center text-gray-600">${summary.count || '-'}</td>
+                    <td class="px-4 py-3 text-sm text-center text-green-600">${formatCurrency(avgUnitPrice)}</td>
+                    <td class="px-4 py-3 text-sm text-center text-gray-600">${formatCurrency(summary.totalAmount)}</td>
+                    <td class="px-4 py-3 text-sm text-center">${summary.count || '-'}</td>
+                </tr>`;
+                });
+            });
+            html += `</tbody></table>`;
+            outputElement.innerHTML = html;
+
+            // --- 渲染年度分析表 (含平均耗用量與天數) ---
+            let avgHtml = `<table class="min-w-full divide-y divide-gray-200 border border-gray-200 rounded-lg">
+                <thead class="bg-orange-50">
+                    <tr>
+                        <th class="px-4 py-3 text-left text-xs font-bold text-orange-800 uppercase border-r sticky left-0 bg-orange-50">年度</th>
+                        <th class="px-4 py-3 text-left text-xs font-bold text-orange-800 uppercase">類別</th>
+                        <th class="px-4 py-3 text-center text-xs font-bold text-orange-800 uppercase">每月平均耗用</th>
+                        <th class="px-4 py-3 text-center text-xs font-bold text-orange-800 uppercase">平均使用天數</th>
+                        <th class="px-4 py-3 text-center text-xs font-bold text-orange-800 uppercase">平均單價</th>
+                        <th class="px-4 py-3 text-center text-xs font-bold text-orange-800 uppercase">總金額</th>
+                    </tr>
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-200">`;
+
+            sortedYears.forEach(year => {
+                const monthsInYear = Object.keys(report).filter(m => m.startsWith(`${year}-`));
+                const monthCount = monthsInYear.length;
+
+                sortedCategories.forEach((cat, index) => {
+                    // 計算總耗用
+                    let totalInYear = 0;
+                    let totalAmountInYear = 0;
+                    let pricedCountInYear = 0;
+                    monthsInYear.forEach(m => {
+                        const summary = report[m]?.[cat] || { count: 0, totalAmount: 0, pricedCount: 0 };
+                        totalInYear += summary.count;
+                        totalAmountInYear += summary.totalAmount;
+                        pricedCountInYear += summary.pricedCount;
+                    });
+                    
+                    // 計算平均使用天數 (只統計已記錄耗盡日期的紀錄)
+                    const completedUsageDays = depletedData
+                        .filter(item => item.category === cat && new Date(item.endDate).getFullYear() === year)
+                        .map(item => getUsageDays(item, false))
+                        .filter(days => days !== null);
+                    
+                    let avgUsageDays = 0;
+                    if (completedUsageDays.length > 0) {
+                        const totalUsageDays = completedUsageDays.reduce((sum, days) => sum + days, 0);
+                        avgUsageDays = Math.round(totalUsageDays / completedUsageDays.length);
+                    }
+
+                    const avgQty = monthCount > 0 ? (totalInYear / monthCount).toFixed(1) : 0;
+                    const avgUnitPrice = pricedCountInYear > 0 ? totalAmountInYear / pricedCountInYear : 0;
+                    
+                    avgHtml += `
+                        <tr class="hover:bg-orange-50 transition">
+                            ${index === 0 ? `<td rowspan="${sortedCategories.length}" class="px-4 py-3 whitespace-nowrap text-sm font-bold text-gray-900 border-r sticky left-0 bg-white align-top">
+                                ${year} 年 <br><span class="text-[10px] text-gray-400 font-normal">基準: ${monthCount} 個月</span>
+                            </td>` : ''}
+                            <td class="px-4 py-3 text-sm font-medium text-gray-800">${cat}</td>
+                            <td class="px-4 py-3 text-sm text-center font-bold text-indigo-600">${avgQty > 0 ? avgQty + ' 個/月' : '-'}</td>
+                            <td class="px-4 py-3 text-sm text-center text-orange-500">${avgUsageDays > 0 ? avgUsageDays + ' 天' : '尚無耗盡紀錄'}</td>
+                            <td class="px-4 py-3 text-sm text-center text-green-600">${formatCurrency(avgUnitPrice)}</td>
+                            <td class="px-4 py-3 text-sm text-center text-gray-600">${formatCurrency(totalAmountInYear)}</td>
+                        </tr>`;
+                });
+            });
+
+            avgHtml += `</tbody></table>`;
+            avgOutputElement.innerHTML = avgHtml;
+        }
+
+        async function refreshData() {
+            const allData = await getAllConsumptions();
+            updateUI(allData);
+        }
+
+        window.handleDepleteClick = async function(id) {
+            try {
+                const allData = await getAllConsumptions();
+                const targetItem = allData.find(item => item.id === id);
+
+                if (!targetItem) {
+                    throw new Error('找不到這筆紀錄');
+                }
+
+                pendingDepleteId = id;
+                document.getElementById('deplete-date').value = targetItem.endDate || todayString();
+                document.getElementById('deplete-modal').classList.remove('hidden');
+            } catch (err) {
+                console.error(err);
+                displayMessage("開啟耗盡日期失敗", 'error');
+            }
+        };
+
+        window.handleMonthlyDepletedClick = async function(month) {
+            currentMonthlyDepletedMonth = month;
+            document.getElementById('monthly-depleted-modal').classList.remove('hidden');
+            await renderMonthlyDepletedRecords(month);
+        };
+
+        window.handleDeleteClick = function(id) {
+            pendingDeleteId = id;
+            document.getElementById('confirm-modal').classList.remove('hidden');
+        };
+
+        document.getElementById('cancel-delete').addEventListener('click', () => {
+            pendingDeleteId = null;
+            document.getElementById('confirm-modal').classList.add('hidden');
+        });
+
+        document.getElementById('confirm-delete').addEventListener('click', async () => {
+            if (pendingDeleteId !== null) {
+                try {
+                    await deleteConsumption(pendingDeleteId);
+                    displayMessage("記錄已成功刪除", 'success');
+                    await refreshData();
+                    if (currentMonthlyDepletedMonth) {
+                        await renderMonthlyDepletedRecords(currentMonthlyDepletedMonth);
+                    }
+                } catch (err) {
+                    console.error(err);
+                    displayMessage("刪除失敗", 'error');
+                }
+            }
+            pendingDeleteId = null;
+            document.getElementById('confirm-modal').classList.add('hidden');
+        });
+
+        document.getElementById('close-monthly-depleted').addEventListener('click', () => {
+            currentMonthlyDepletedMonth = null;
+            document.getElementById('monthly-depleted-modal').classList.add('hidden');
+        });
+
+        document.getElementById('cancel-deplete').addEventListener('click', () => {
+            pendingDepleteId = null;
+            document.getElementById('deplete-modal').classList.add('hidden');
+        });
+
+        document.getElementById('confirm-deplete').addEventListener('click', async () => {
+            const endDate = document.getElementById('deplete-date').value;
+
+            if (pendingDepleteId === null) return;
+            if (!endDate) {
+                displayMessage("請選擇耗盡日期", 'error');
+                return;
+            }
+
+            try {
+                const allData = await getAllConsumptions();
+                const targetItem = allData.find(item => item.id === pendingDepleteId);
+
+                if (!targetItem) {
+                    throw new Error('找不到這筆紀錄');
+                }
+
+                if (normalizeDate(endDate) < normalizeDate(targetItem.date)) {
+                    displayMessage("耗盡日期不能早於開始使用日期", 'error');
+                    return;
+                }
+
+                await updateConsumptionEndDate(pendingDepleteId, endDate);
+                displayMessage("已記錄耗盡日期", 'success');
+                await refreshData();
+                if (currentMonthlyDepletedMonth) {
+                    await renderMonthlyDepletedRecords(currentMonthlyDepletedMonth);
+                }
+                pendingDepleteId = null;
+                document.getElementById('deplete-modal').classList.add('hidden');
+            } catch (err) {
+                console.error(err);
+                displayMessage("記錄耗盡日期失敗", 'error');
+            }
+        });
+
+        document.getElementById('export-data').addEventListener('click', async () => {
+            try {
+                const data = await getAllConsumptions();
+                const backup = {
+                    app: 'SparePartsConsumptionTracker',
+                    exportedAt: new Date().toISOString(),
+                    version: 1,
+                    records: data.map(({ id, ...item }) => item)
+                };
+                const today = new Date().toISOString().substring(0, 10);
+                downloadJson(`備品耗用量備份-${today}.json`, backup);
+                displayMessage(`已匯出 ${data.length} 筆紀錄`, 'success');
+            } catch (err) {
+                console.error(err);
+                displayMessage("匯出失敗", 'error');
+            }
+        });
+
+        document.getElementById('import-data').addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            try {
+                const text = await file.text();
+                const parsed = JSON.parse(text);
+                const rawRecords = Array.isArray(parsed) ? parsed : parsed.records;
+
+                if (!Array.isArray(rawRecords)) {
+                    throw new Error('備份檔格式不正確');
+                }
+
+                const currentData = await getAllConsumptions();
+                const existingKeys = new Set(currentData.map(getRecordKey));
+                const importedRecords = [];
+                let skippedCount = 0;
+
+                rawRecords.forEach(record => {
+                    const item = normalizeImportedItem(record);
+                    if (!item) {
+                        skippedCount += 1;
+                        return;
+                    }
+
+                    const key = getRecordKey(item);
+                    if (existingKeys.has(key)) {
+                        skippedCount += 1;
+                        return;
+                    }
+
+                    existingKeys.add(key);
+                    importedRecords.push(item);
+                });
+
+                if (importedRecords.length > 0) {
+                    await addConsumptions(importedRecords);
+                }
+
+                await refreshData();
+                displayMessage(`已匯入 ${importedRecords.length} 筆，略過 ${skippedCount} 筆`, 'success');
+            } catch (err) {
+                console.error(err);
+                displayMessage("匯入失敗，請確認檔案是否正確", 'error');
+            } finally {
+                e.target.value = '';
+            }
+        });
+
+        document.getElementById('consumption-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const dateInput = document.getElementById('date');
+            const specInput = document.getElementById('spec');
+            const categoryInput = document.getElementById('category');
+            const amountInput = document.getElementById('amount');
+            const amount = amountInput.value === '' ? null : Number(amountInput.value);
+
+            const newItem = {
+                date: dateInput.value,
+                endDate: null,
+                spec: specInput.value.trim(),
+                category: categoryInput.value.trim(),
+                amount: Number.isFinite(amount) ? amount : null
+            };
+
+            try {
+                await addConsumption(newItem);
+                displayMessage("記錄新增成功！", 'success');
+                specInput.value = ''; 
+                amountInput.value = '';
+                await refreshData();
+            } catch (err) {
+                console.error(err);
+                displayMessage("儲存失敗", 'error');
+            }
+        });
+
+        window.onload = async () => {
+            document.getElementById('date').value = todayString();
+            try {
+                await openDatabase();
+                await refreshData();
+            } catch (err) {
+                console.error("啟動失敗", err);
+            }
+        };
+    </script>
+</body>
+</html>
